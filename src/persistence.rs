@@ -28,7 +28,12 @@ fn default_lesson_history() -> Vec<SavedLessonResult> {
     Vec::new()
 }
 
-/// Compute YYYY-MM-DD for the current Unix day (UTC).
+/// Compute YYYY-MM-DD for the current *local* calendar day.
+///
+/// The daily goal is a "did I practice today" counter, so it has to roll over
+/// at local midnight, not UTC midnight — otherwise anyone west of UTC sees
+/// evening practice counted toward tomorrow. The offset comes from libc's
+/// `localtime_r` (honours `TZ`); non-unix targets fall back to UTC.
 ///
 /// Uses Howard Hinnant's "civil_from_days" algorithm (public domain) to map
 /// days-since-1970-01-01 → (year, month, day). Avoids pulling in chrono.
@@ -39,7 +44,25 @@ pub fn today_date_string() -> String {
         Ok(d) => d.as_secs() as i64,
         Err(_) => return String::new(),
     };
-    date_string_from_unix_secs(secs)
+    date_string_from_unix_secs(secs + local_utc_offset_secs(secs))
+}
+
+/// Seconds east of UTC for the local timezone at the given Unix time.
+#[cfg(unix)]
+fn local_utc_offset_secs(secs: i64) -> i64 {
+    let t: libc::time_t = secs as libc::time_t;
+    // SAFETY: `tm` is a plain C struct; localtime_r only writes into the
+    // out-pointer we give it and is thread-safe.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        return 0;
+    }
+    tm.tm_gmtoff as i64
+}
+
+#[cfg(not(unix))]
+fn local_utc_offset_secs(_secs: i64) -> i64 {
+    0
 }
 
 /// Pure helper: format the UTC date for a Unix timestamp in seconds as YYYY-MM-DD.
@@ -345,6 +368,22 @@ mod tests {
         let bytes = s.as_bytes();
         assert_eq!(bytes[4], b'-');
         assert_eq!(bytes[7], b'-');
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn today_uses_local_timezone() {
+        // 2025-01-15 23:00 UTC is still Jan 15 in UTC but Jan 16 in UTC+6.
+        std::env::set_var("TZ", "Etc/GMT-6");
+        extern "C" {
+            fn tzset();
+        }
+        unsafe { tzset() };
+        assert_eq!(local_utc_offset_secs(1_736_982_000), 6 * 3600);
+        assert_eq!(
+            date_string_from_unix_secs(1_736_982_000 + local_utc_offset_secs(1_736_982_000)),
+            "2025-01-16"
+        );
     }
 
     #[test]

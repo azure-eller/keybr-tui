@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Daily goal now rolls over at local midnight instead of UTC midnight. Previously an
+  evening session west of UTC was stamped with tomorrow's date, so the goal bar started
+  the next morning already (partly) full. The local offset comes from `libc::localtime_r`
+  (already in the dependency tree via crossterm); non-unix targets keep UTC.
+
 ## [0.2.2] - 2026-07-23
 
 ### Added
